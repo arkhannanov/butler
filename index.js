@@ -1,5 +1,6 @@
 const fs = require('fs');
 
+// Генерация списка email'ов
 const generateEmailList = (count) => {
     const names = [
         "Иванов Иван Иванович", "Иванов И И", "Ли Тян",
@@ -20,6 +21,12 @@ const generateEmailList = (count) => {
     }
 
     return emails;
+};
+
+// Сохранение email'ов в файл
+function saveEmails(emails) {
+    fs.writeFileSync('emails.json', JSON.stringify(emails, null, 2), 'utf8');
+    console.log('Email list saved to file.');
 }
 
 // Загрузка email'ов из файла
@@ -34,26 +41,7 @@ function loadEmails() {
     }
 }
 
-// Сохранение email'ов в файл
-function saveEmails(emails) {
-    fs.writeFileSync('emails.json', JSON.stringify(emails, null, 2), 'utf8');
-    console.log('Email list saved to file.');
-}
-
-async function sendEmail(email, name) {
-    return new Promise((resolve, reject) => {
-        setTimeout(() => {
-            if (Math.floor(Math.random() * 10) > 0) {
-                console.log(`отправлено на ${email}`);
-                resolve(Math.floor(Math.random() * 100000));
-            } else {
-                console.error(`не отправлено на ${email}`);
-                reject(new Error('не отправлено'));
-            }
-        }, Math.floor(Math.random() * (2000 - 100) + 100));
-    });
-}
-
+// Загрузка списка успешно отправленных email'ов
 function loadSentEmails() {
     try {
         const data = fs.readFileSync('sentEmails.json', 'utf8');
@@ -65,31 +53,35 @@ function loadSentEmails() {
     }
 }
 
+// Сохранение списка успешно отправленных email'ов
 function saveSentEmails(emailsSet) {
     fs.writeFileSync('sentEmails.json', JSON.stringify(Array.from(emailsSet), null, 2), 'utf8');
     console.log('Sent email list saved to file.');
 }
 
-async function main() {
-    let emails = loadEmails(); // Загружаем существующие email'ы из файла
+// Функция "отправки" письма
+async function sendEmail(email, name) {
+    return new Promise((resolve, reject) => {
+        setTimeout(() => {
+            if (Math.floor(Math.random() * 10) > 0) {
+                console.log(`Письмо успешно отправлено на ${email}`);
+                resolve(Math.floor(Math.random() * 100000)); // Успешно отправлено
+            } else {
+                console.error(`Ошибка отправки письма на ${email}`);
+                reject(new Error('не отправлено')); // Ошибка
+            }
+        }, Math.floor(Math.random() * (2000 - 100) + 100)); // Имитация задержки отправки
+    });
+}
 
-    if (!emails) {
-        emails = generateEmailList(130); // Генерируем email'ы, если они ещё не сохранены
-        saveEmails(emails); // Сохраняем сгенерированные email'ы
-    }
-
-    const successfullySentEmails = loadSentEmails();
-
-    if (successfullySentEmails.size === emails.length) {
-        console.log('Нет смысла заново запускать скрипт, так как все письма успешно отправлены. 😊');
-        return;
-    }
-
+// Функция-ограничитель для обработки не более 10 писем в 10 секунд
+async function processEmailsWithLimit(emails, successfullySentEmails) {
     const results = [];
-    let index = 0;
+    const batchSize = 10; // Максимум 10 писем за раз
+    const delay = 10000; // 10 секунд задержки между партиями
 
-    while (index < emails.length) {
-        const batch = emails.slice(index, index + 60);
+    for (let i = 0; i < emails.length; i += batchSize) {
+        const batch = emails.slice(i, i + batchSize);
         const batchPromises = batch.map(async ({ fio, email }) => {
             if (successfullySentEmails.has(email)) {
                 return { email, status: 'уже отправлено' };
@@ -104,21 +96,46 @@ async function main() {
             }
         });
 
+        // Ждем результатов выполнения текущей партии
         const batchResults = await Promise.all(batchPromises);
         results.push(...batchResults);
 
-        index += 60;
-
-        if (index < emails.length) {
-            await new Promise(resolve => setTimeout(resolve, 60000)); // Ждем минуту
+        // Если остались еще письма, ждем 10 секунд перед обработкой следующей партии
+        if (i + batchSize < emails.length) {
+            console.log(`Ожидание ${delay / 1000} секунд перед следующей партией...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
         }
     }
 
+    return results;
+}
+
+async function main() {
+    let emails = loadEmails(); // Загружаем список email'ов
+
+    if (!emails) {
+        emails = generateEmailList(45); // Генерируем email'ы, если их нет
+        saveEmails(emails); // Сохраняем сгенерированный список
+    }
+
+    const successfullySentEmails = loadSentEmails(); // Загружаем отправленные email'ы
+
+    // Если все письма уже отправлены
+    if (successfullySentEmails.size === emails.length) {
+        console.log('Все письма уже отправлены. 😊');
+        return;
+    }
+
+    // Отправляем письма с учетом ограничений
+    const results = await processEmailsWithLimit(emails, successfullySentEmails);
+
+    // Сохраняем обновленный список успешно отправленных email'ов
     saveSentEmails(successfullySentEmails);
+
     console.log('Результаты отправки:', results);
 
     if (successfullySentEmails.size === emails.length) {
-        console.log("Это Успех! На все email'ы отправлены письма 🎉");
+        console.log("Поздравляем! Все письма успешно отправлены 🎉");
     }
 }
 
